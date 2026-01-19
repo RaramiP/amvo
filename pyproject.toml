@@ -1,0 +1,32 @@
+[project]
+name = "amvo"
+version = "0.1.0"
+description = "Short project description"
+readme = "readme.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "RaramiP" }
+]
+
+dependencies = [
+  "numpy",
+  "opencv-python",
+  "opencv-contrib-python",
+  "scikit-learn",
+  "matplotlib",
+]
+
+[project.optional-dependencies]
+dev = [
+  "jupyter",
+]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
