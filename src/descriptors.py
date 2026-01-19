@@ -6,6 +6,10 @@ import os
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, confusion_matrix
 from skimage.feature import local_binary_pattern
+from sklearn.neighbors import NearestNeighbors
+from sklearn.linear_model import LogisticRegression
+
+from typing import Tuple
 
 DATA_PATH = "../data/caltech101_subset/"
 SUBSET_PATH = DATA_PATH + "caltech101_subset.files"
@@ -39,7 +43,7 @@ def color_histogram(im, bins_per_channel=8):
     return histogram
 
 
-def load_image():
+def load_image(grey=False):
     """Loads images and their labels from a subset file.
     :return List of loaded images and corresponding labels
     @rtype (list of Numpy arrays, Numpy array)
@@ -61,6 +65,8 @@ def load_image():
             continue
 
         img = cv2.imread(os.path.join(DATA_PATH, img_path))
+        if grey:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         imgs.append(img)
         labels.append(label)
     return imgs, np.array(labels)
@@ -127,7 +133,7 @@ def geometric_split(imgs, function, nb_split=5):
     return res
 
 
-def process_train_test(model, data, labels):
+def process_train_test(data, labels):
     """Trains a model and evaluates it on a test set.
     :param model Machine learning model
     :param data Feature vectors
@@ -139,7 +145,82 @@ def process_train_test(model, data, labels):
     @rtype (float, Numpy array, Numpy array)
     """
     X_train, X_test, y_train, y_test = train_test_split(data, labels, test_size=0.2)
-
+    model = LogisticRegression(max_iter=1000, multi_class="auto", solver="lbfgs")
     model.fit(X_train, y_train)
     predic = model.predict(X_test)
-    return accuracy_score(y_test, predic), confusion_matrix(predic, y_test), labels
+    return accuracy_score(y_test, predic), confusion_matrix(predic, y_test)
+
+
+def SIFT_create(imgs):
+    """Computes SIFT keypoints and descriptors for a set of images.
+    :param imgs List of images
+    @type imgs List of Numpy arrays of shape (height, width, 3)
+    :return List of SIFT keypoints and descriptors
+    @rtype (list of list of cv2.KeyPoint, list of Numpy arrays)
+    """
+    keypoints = []
+    descriptors = []
+    sift = cv2.SIFT_create()
+    for img in imgs:
+        keypoint, desc = sift.detectAndCompute(img, None)
+        keypoints.append(keypoint)
+        descriptors.append(desc)
+    return keypoints, descriptors
+
+
+def draw_keypoint(img: np.ndarray, keypoints: cv2.KeyPoint):
+    """Draws keypoints on an image.
+    :param img Image to draw keypoints on
+    :param keypoints List of keypoints
+    @type img Numpy array of type uint8 and shape (height, width, 3)
+    @type keypoints List of cv2.KeyPoint
+    """
+    for kp in keypoints:
+        x, y = np.round(kp.pt).astype(int)
+        cv2.circle(img, (x, y), 3, (0, 0, 255), -1)
+    plt.imshow(img)
+    plt.show()
+
+
+def draw_keypoint_with_cv(img: np.ndarray, keypoints: Tuple[cv2.KeyPoint]):
+    """Draws keypoints on an image.
+    :param img Image to draw keypoints on
+    :param keypoints List of keypoints
+    @type img Numpy array of type uint8 and shape (height, width, 3)
+    @type keypoints List of cv2.KeyPoint
+    """
+    out_img = cv2.drawKeypoints(
+        img,
+        keypoints,
+        None,
+        color=(0, 0, 255),
+        flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS,
+    )
+    cv2.imshow("Keypoints", out_img)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+
+def visual_word(descriptors, vocabulary):
+    if descriptors is None:
+        return np.zeros(vocabulary.shape[0])
+
+    nn = NearestNeighbors(n_neighbors=1, algorithm="brute")
+    nn.fit(vocabulary)
+    indices = nn.kneighbors(descriptors, return_distance=False)
+
+    hist = np.zeros(vocabulary.shape[0])
+    for idx in indices:
+        hist[idx[0]] += 1
+    return hist
+
+
+def histograms_from_descriptors(descriptors_list, vocabulary):
+    n_images = len(descriptors_list)
+    n_words = vocabulary.shape[0]
+    hists = np.zeros((n_images, n_words))
+
+    for i, desc in enumerate(descriptors_list):
+        hists[i] = visual_word(desc, vocabulary)
+
+    return hists
