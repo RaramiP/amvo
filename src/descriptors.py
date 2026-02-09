@@ -1,226 +1,113 @@
+import os
 import cv2
 import numpy as np
-import matplotlib.pyplot as plt
-import os
-
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, confusion_matrix
 from skimage.feature import local_binary_pattern
 from sklearn.neighbors import NearestNeighbors
+from sklearn.decomposition import PCA
+from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
-
-from typing import Tuple
-
-DATA_PATH = "../data/caltech101_subset/"
-SUBSET_PATH = DATA_PATH + "caltech101_subset.files"
-SEED = 42
-np.random.seed(SEED)
-
+from sklearn.metrics import accuracy_score, confusion_matrix
 
 def color_histogram(im, bins_per_channel=8):
-    """Computes a joint color histogram.
-    :param im Color image as a Numpy array of shape (height, width, 3)
-    @param bins_per_channel Number of bins per channel after quantization
-    @type im Numpy array of type uint8 and shape (height, width, 3)
-    @type bins_per_channel Integer
-    @return Normalized color histogram
-    @rtype Numpy array of type float32 and shape (bins_per_channel**3,)
-    """
     im = im.copy()
-
-    # quantize image
     bin_width = 256.0 / bins_per_channel
     im = (im / bin_width).astype(np.uint32)
-
-    # flatten color space
     im = im[..., 0] * bins_per_channel**2 + im[..., 1] * bins_per_channel + im[..., 2]
-
-    # compute and normalize histogram
-    histogram = np.zeros((bins_per_channel**3,), dtype=np.float32)
+    hist = np.zeros((bins_per_channel**3,), dtype=np.float32)
     colors, counts = np.unique(im, return_counts=True)
-    histogram[colors] = counts
-    histogram = histogram / np.linalg.norm(histogram, ord=1)
-    return histogram
-
-
-def load_image(grey=False):
-    """Loads images and their labels from a subset file.
-    :return List of loaded images and corresponding labels
-    @rtype (list of Numpy arrays, Numpy array)
-    """
-    if not os.path.exists(SUBSET_PATH) and not os.path.isfile(SUBSET_PATH):
-        raise FileNotFoundError(f"{SUBSET_PATH} not found")
-
-    with open(SUBSET_PATH, "r") as f:
-        lines = f.readlines()
-
-    imgs, labels = [], []
-    for line in lines:
-        split = line.split()
-        if len(split) != 2:
-            continue
-
-        img_path, label = split
-        if not os.path.exists(os.path.join(DATA_PATH, img_path)):
-            continue
-
-        img = cv2.imread(os.path.join(DATA_PATH, img_path))
-        if grey:
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        imgs.append(img)
-        labels.append(label)
-    return imgs, np.array(labels)
-
-
-def histogram(imgs):
-    """Computes color histograms for a set of images.
-    :param imgs List of color images
-    @type imgs List of Numpy arrays of shape (height, width, 3)
-    :return List of normalized color histograms
-    @rtype List of Numpy arrays
-    """
-    hists = []
-    for img in imgs:
-        hist = color_histogram(img)
-        hists.append(hist)
-    return hists
-
-
-def LBP(imgs):
-    """Computes Local Binary Pattern (LBP) histograms for images.
-    :param imgs List of color images
-    @type imgs List of Numpy arrays of shape (height, width, 3)
-    :return List of normalized LBP histograms
-    @rtype List of Numpy arrays
-    """
-    res = []
-    for img in imgs:
-        grey = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        local = local_binary_pattern(grey, 8, 1)
-        n_bin = int(local.max() + 1)
-        hist = np.histogram(local, bins=np.arange(n_bin + 1), density=True)[0]
-        res.append(hist)
-    return res
-
-
-def geometric_split(imgs, function, nb_split=5):
-    """Applies a geometric split and feature extraction on images.
-    :param imgs List of images
-    :param function Feature extraction function applied to each region
-    :param nb_split Number of geometric splits
-    @type imgs List of Numpy arrays
-    @type function Callable
-    @type nb_split Integer
-    :return List of concatenated feature vectors
-    @rtype List of Numpy arrays
-    """
-    res = []
-    for img in imgs:
-        hist = []
-        for i in range(nb_split):
-            shape = (img.shape[0] // nb_split, img.shape[1] // nb_split)
-            hist.append(
-                function(
-                    [
-                        img[
-                            i * shape[0] : (i + 1) * shape[0],
-                            i * shape[1] : (i + 1) * shape[1],
-                        ]
-                    ]
-                )[0]
-            )
-        res.append(np.hstack(hist))
-    return res
-
-
-def process_train_test(data, labels):
-    """Trains a model and evaluates it on a test set.
-    :param model Machine learning model
-    :param data Feature vectors
-    :param labels Ground truth labels
-    @type model Object with fit and predict methods
-    @type data Numpy array
-    @type labels Numpy array
-    :return Accuracy score, confusion matrix, and labels
-    @rtype (float, Numpy array, Numpy array)
-    """
-    X_train, X_test, y_train, y_test = train_test_split(data, labels, test_size=0.2)
-    model = LogisticRegression(max_iter=1000, multi_class="auto", solver="lbfgs")
-    model.fit(X_train, y_train)
-    predic = model.predict(X_test)
-    return accuracy_score(y_test, predic), confusion_matrix(predic, y_test)
-
-
-def SIFT_create(imgs):
-    """Computes SIFT keypoints and descriptors for a set of images.
-    :param imgs List of images
-    @type imgs List of Numpy arrays of shape (height, width, 3)
-    :return List of SIFT keypoints and descriptors
-    @rtype (list of list of cv2.KeyPoint, list of Numpy arrays)
-    """
-    keypoints = []
-    descriptors = []
-    sift = cv2.SIFT_create()
-    for img in imgs:
-        keypoint, desc = sift.detectAndCompute(img, None)
-        keypoints.append(keypoint)
-        descriptors.append(desc)
-    return keypoints, descriptors
-
-
-def draw_keypoint(img: np.ndarray, keypoints: cv2.KeyPoint):
-    """Draws keypoints on an image.
-    :param img Image to draw keypoints on
-    :param keypoints List of keypoints
-    @type img Numpy array of type uint8 and shape (height, width, 3)
-    @type keypoints List of cv2.KeyPoint
-    """
-    for kp in keypoints:
-        x, y = np.round(kp.pt).astype(int)
-        cv2.circle(img, (x, y), 3, (0, 0, 255), -1)
-    plt.imshow(img)
-    plt.show()
-
-
-def draw_keypoint_with_cv(img: np.ndarray, keypoints: Tuple[cv2.KeyPoint]):
-    """Draws keypoints on an image.
-    :param img Image to draw keypoints on
-    :param keypoints List of keypoints
-    @type img Numpy array of type uint8 and shape (height, width, 3)
-    @type keypoints List of cv2.KeyPoint
-    """
-    out_img = cv2.drawKeypoints(
-        img,
-        keypoints,
-        None,
-        color=(0, 0, 255),
-        flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS,
-    )
-    cv2.imshow("Keypoints", out_img)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-
-
-def visual_word(descriptors, vocabulary):
-    if descriptors is None:
-        return np.zeros(vocabulary.shape[0])
-
-    nn = NearestNeighbors(n_neighbors=1, algorithm="brute")
-    nn.fit(vocabulary)
-    indices = nn.kneighbors(descriptors, return_distance=False)
-
-    hist = np.zeros(vocabulary.shape[0])
-    for idx in indices:
-        hist[idx[0]] += 1
+    hist[colors] = counts
+    hist = hist / np.linalg.norm(hist, ord=1)
     return hist
 
+def compute_color_descriptors(image_files, bins_per_channel=8):
+    desc = []
+    for file in image_files:
+        img = cv2.imread(file)
+        desc.append(color_histogram(img, bins_per_channel=bins_per_channel))
+    return np.array(desc, dtype=np.float32)
 
-def histograms_from_descriptors(descriptors_list, vocabulary):
-    n_images = len(descriptors_list)
-    n_words = vocabulary.shape[0]
-    hists = np.zeros((n_images, n_words))
 
-    for i, desc in enumerate(descriptors_list):
-        hists[i] = visual_word(desc, vocabulary)
+def lbp_histogram(im, P=8, R=1, nbins=256):
+    gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
+    lbp = local_binary_pattern(gray, P, R, method="default")
+    hist, _ = np.histogram(lbp.ravel(), bins=nbins, range=(0, nbins))
+    hist = hist.astype(np.float32)
+    hist = hist / np.linalg.norm(hist, ord=1)
+    return hist
 
-    return hists
+def lbp_descriptors(image_files, P=8, R=1, nbins=256):
+    desc = []
+    for file in image_files:
+        img = cv2.imread(file)
+        desc.append(lbp_histogram(img, P=P, R=R, nbins=nbins))
+    return np.array(desc, dtype=np.float32)
+
+def fuse_descriptors(*desc_list):
+    return np.hstack(desc_list)
+
+def grid_descriptor(im, descriptor="color", grid_size=(5, 5), bins_per_channel=8, P=8, R=1, nbins=256):
+    h, w = im.shape[:2]
+    dh, dw = h // grid_size[0], w // grid_size[1]
+    region_desc = []
+    for i in range(grid_size[0]):
+        for j in range(grid_size[1]):
+            region = im[i*dh:(i+1)*dh, j*dw:(j+1)*dw]
+            if descriptor == "color":
+                hist = color_histogram(region, bins_per_channel=bins_per_channel)
+            elif descriptor == "lbp":
+                hist = lbp_histogram(region, P=P, R=R, nbins=nbins)
+            region_desc.append(hist)
+    return np.hstack(region_desc)
+
+def grid_descriptors(image_files, descriptor="color", grid_size=(5,5), bins_per_channel=8, P=8, R=1, nbins=256):
+    desc = []
+    for file in image_files:
+        img = cv2.imread(file)
+        desc.append(grid_descriptor(img, descriptor=descriptor, grid_size=grid_size,
+                                    bins_per_channel=bins_per_channel, P=P, R=R, nbins=nbins))
+    return np.array(desc, dtype=np.float32)
+
+def train_test(descriptors, labels, test_size=0.2, random_state=42):
+    X_train, X_test, y_train, y_test = train_test_split(descriptors, labels, test_size=test_size, random_state=random_state, stratify=labels)
+    clf = LogisticRegression(max_iter=1000)
+    clf.fit(X_train, y_train)
+    y_pred = clf.predict(X_test)
+    acc = accuracy_score(y_test, y_pred)
+    cm = confusion_matrix(y_test, y_pred, labels=sorted(set(labels)))
+    return acc, cm, y_test, y_pred
+
+def sift_descriptors(image_files):
+    sift = cv2.SIFT_create()
+    all_keypoints = []
+    all_descriptors = []
+    for file in image_files:
+        img = cv2.imread(file)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        keypoints, descriptors = sift.detectAndCompute(gray, None)
+        all_keypoints.append(keypoints)
+        all_descriptors.append(descriptors)
+    return all_keypoints, all_descriptors
+
+def draw_sift_keypoints(img, keypoints):
+    img_kp = img.copy()
+    for kp in keypoints:
+        x, y = int(kp.pt[0]), int(kp.pt[1])
+        cv2.circle(img_kp, (x, y), int(round(kp.size/2)), (0, 255, 0), 1)
+    return img_kp
+
+def bow_histogram(descriptors, vocabulary):
+    if descriptors is None or len(descriptors) == 0:
+        return np.zeros(vocabulary.shape[0], dtype=np.float32)
+    nn = NearestNeighbors(n_neighbors=1, algorithm='brute').fit(vocabulary)
+    distances, indices = nn.kneighbors(descriptors)
+    hist = np.zeros(vocabulary.shape[0], dtype=np.float32)
+    for idx in indices.flatten():
+        hist[idx] += 1
+    hist = hist / np.linalg.norm(hist, ord=1)
+    return hist
+
+def bow_descriptors(all_descriptors, vocabulary):
+    bow_desc = []
+    for desc in all_descriptors:
+        bow_desc.append(bow_histogram(desc, vocabulary))
+    return np.array(bow_desc, dtype=np.float32)

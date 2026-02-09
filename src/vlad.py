@@ -37,43 +37,18 @@ def vlad(descriptors, vocabulary, use_l2_norm=True, use_sqrt_norm=True):
     return vlad
 
 
-def compute_all_vlad(descriptors_list, vocabulary):
-    """
-    Calcule les descripteurs VLAD pour toutes les images du jeu de données.
+def vlad_descriptors(all_descriptors, vocabulary, vlad_func):
+    vlad_desc = []
+    for desc in all_descriptors:
+        if desc is None:
+            vlad_vec = np.zeros(vocabulary.shape[0]*vocabulary.shape[1], dtype=np.float32)
+        else:
+            vlad_vec = vlad_func(desc, vocabulary)
+        vlad_desc.append(vlad_vec)
+    return np.array(vlad_desc, dtype=np.float32)
 
-    :param descriptors_list: liste des descripteurs SIFT (un array Nx128 par image)
-    :param vocabulary: vocabulaire visuel (Kx128)
-    :return: matrice VLAD (n_images x (K*128))
-    """
-    n_images = len(descriptors_list)
-    K, D = vocabulary.shape
-
-    vlad_dim = K * D
-    vlad_descriptors = np.zeros((n_images, vlad_dim), dtype=np.float64)
-
-    for i, descriptors in enumerate(descriptors_list):
-        if descriptors is None:
-            continue  # image sans points d'intérêt
-
-        vlad_descriptors[i] = vlad(descriptors, vocabulary)
-
-    return vlad_descriptors
-
-
-def reduce_vlad_pca(vlad_vectors, n_components=100):
-    """
-    Réduction de dimension des VLAD par ACP après centrage.
-
-    :param vlad_vectors: matrice VLAD (n_images x 6400)
-    :param n_components: nombre de composantes principales
-    :return: VLAD réduits (n_images x n_components)
-    """
-    # centrage
-    mean_vlad = np.mean(vlad_vectors, axis=0)
-    vlad_centered = vlad_vectors - mean_vlad
-
-    # ACP
+def reduce_vlad_dimension(vlad_vectors, n_components):
     pca = PCA(n_components=n_components)
+    vlad_centered = vlad_vectors - np.mean(vlad_vectors, axis=0)
     vlad_reduced = pca.fit_transform(vlad_centered)
-
-    return vlad_reduced, pca
+    return vlad_reduced
